@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- 아이폰 홈 화면에 추가했을 때 브라우저 주소창 없이 앱처럼 열리게 하는 설정 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="코스피 수급">
+<title>코스피 투자자별 순매수</title>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --sub: #6b6b6b;
+    --line: #dcdcd6;
+    --paper: #fbfaf7;
+    --week-yellow: #fdf3c8;
+    --week-white: #ffffff;
+    --foreign: #d3312a;   /* 외국인 - 빨강 */
+    --individual: #1a56c4; /* 개인 - 파랑 */
+    --institution: #111111; /* 기관 - 검정 */
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo",
+                 "Malgun Gothic", sans-serif;
+  }
+  header {
+    padding: 20px 20px 8px;
+    border-bottom: 1px solid var(--line);
+    padding-top: max(20px, env(safe-area-inset-top));
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    font-size: 14px;
+    font-weight: 700;
+    margin: 24px 20px 0;
+  }
+  .meta {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: baseline;
+    font-size: 12px;
+    color: var(--sub);
+  }
+  .legend {
+    display: flex;
+    gap: 14px;
+    margin-top: 10px;
+    font-size: 12px;
+  }
+  .legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .swatch {
+    width: 10px; height: 10px; border-radius: 2px; display: inline-block;
+  }
+  #status {
+    padding: 4px 20px;
+    font-size: 12px;
+    color: var(--sub);
+  }
+  #status.error { color: #b3261e; }
+  .chart-wrap {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 10px 0 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+  svg { display: block; }
+  .bar-foreign { fill: var(--foreign); }
+  .bar-individual { fill: var(--individual); }
+  .bar-institution { fill: var(--institution); }
+  .axis-label {
+    font-size: 10px;
+    fill: var(--sub);
+  }
+  .tick-line { stroke: var(--line); stroke-width: 1; }
+  .zero-line { stroke: var(--ink); stroke-width: 1; }
+  #refreshBtn {
+    border: 1px solid var(--line);
+    background: white;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--ink);
+  }
+  #refreshBtn:hover { background: #f2f0ea; }
+  footer {
+    padding: 8px 20px 24px;
+    font-size: 11px;
+    color: var(--sub);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>코스피 투자자별 순매수</h1>
+  <div class="meta">
+    <span id="updatedAt">불러오는 중…</span>
+    <button id="refreshBtn">새로고침</button>
+  </div>
+  <div class="legend">
+    <span><i class="swatch" style="background:var(--foreign)"></i>외국인</span>
+    <span><i class="swatch" style="background:var(--individual)"></i>개인</span>
+    <span><i class="swatch" style="background:var(--institution)"></i>기관</span>
+    <span><i class="swatch" style="background:var(--week-yellow); border:1px solid var(--line)"></i>단위 구간 배경(번갈아 표시)</span>
+  </div>
+</header>
+
+<div id="status"></div>
+
+<h2>주간 순매수 &middot; 최근 52주</h2>
+<div class="chart-wrap" id="weekChartWrap"></div>
+
+<h2>일별 순매수 &middot; 최근 5거래일</h2>
+<div class="chart-wrap" id="dayChartWrap"></div>
+
+<footer>
+  데이터: 한국거래소(KRX) 투자자별 거래실적 &middot; 단위: 십억원 &middot;
+  이 페이지는 구글 시트에 심어둔 Apps Script 웹앱(<code>doGet</code>)에서
+  최신 데이터를 직접 불러옵니다. 일별 값은 전일까지 확정치이며, 장중
+  실시간 값이 아닙니다.
+</footer>
+
+<script>
+// ▼▼▼ 여기에 본인의 Apps Script 웹앱 URL을 붙여넣으세요 ▼▼▼
+// 배포 방법: Apps Script 편집기 > 배포 > 새 배포 > 유형: 웹앱
+//           실행: 나(본인 계정) / 액세스 권한: 모든 사용자
+// 배포 후 나오는 "...../exec" 로 끝나는 URL을 그대로 아래에 넣으세요.
+const WEB_APP_URL = 'PASTE_YOUR_WEB_APP_EXEC_URL_HERE';
+// ▲▲▲ ------------------------------------------------- ▲▲▲
+
+const statusEl = document.getElementById('status');
+const weekWrapEl = document.getElementById('weekChartWrap');
+const dayWrapEl = document.getElementById('dayChartWrap');
+const updatedAtEl = document.getElementById('updatedAt');
+
+document.getElementById('refreshBtn').addEventListener('click', load);
+load();
+
+async function load() {
+  if (!WEB_APP_URL || WEB_APP_URL.indexOf('PASTE_YOUR') === 0) {
+    setStatus('WEB_APP_URL이 아직 설정되지 않았습니다. 이 파일 하단의 ' +
+      "WEB_APP_URL 값을 Apps Script 웹앱 URL로 바꿔주세요.", true);
+    return;
+  }
+  setStatus('데이터를 불러오는 중…', false);
+  try {
+    const res = await fetch(WEB_APP_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.weeks && data.weeks.length) {
+      render(weekWrapEl, data.weeks, { barW: 9, barGap: 2 });
+    }
+    if (data.days && data.days.length) {
+      render(dayWrapEl, data.days, { barW: 24, barGap: 5 }); // 5개뿐이라 막대를 더 두껍게
+    }
+    setStatus('', false);
+    updatedAtEl.textContent = '갱신 시각: ' + new Date(data.updatedAt).toLocaleString('ko-KR');
+  } catch (err) {
+    setStatus('불러오기 실패: ' + err.message +
+      ' (웹앱 URL이 맞는지, 배포 시 "모든 사용자" 접근권한으로 했는지 확인하세요)', true);
+  }
+}
+
+function setStatus(msg, isError) {
+  statusEl.textContent = msg;
+  statusEl.className = isError ? 'error' : '';
+}
+
+function render(wrapEl, points, sizing) {
+  const n = points.length;
+
+  // ---- 레이아웃 상수 ----
+  const barW = sizing.barW;
+  const barGap = sizing.barGap;
+  const groupW = barW * 3 + barGap * 2;      // 한 구간 묶음(외국인/개인/기관) 너비
+  const gap = groupW * 2;                    // 구간-구간 사이 간격 = 묶음 너비의 2배
+  const slot = groupW + gap;                 // 한 구간이 차지하는 전체 폭
+  const marginL = 60, marginR = 20, marginT = 16, marginB = 70;
+  const plotW = n * slot;
+  const plotH = 320;
+  const totalW = marginL + plotW + marginR;
+  const totalH = marginT + plotH + marginB;
+
+  const maxAbs = Math.max(1, ...points.map(w =>
+    Math.max(Math.abs(w.foreign), Math.abs(w.individual), Math.abs(w.institution))
+  ));
+  const yMax = niceCeil(maxAbs);
+  const yScale = v => (plotH / 2) - (v / yMax) * (plotH / 2 - 10);
+
+  let svg = '';
+  svg += `<svg width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}" xmlns="http://www.w3.org/2000/svg">`;
+
+  // 구간 단위 배경 밴드 (번갈아 노랑/흰색)
+  points.forEach((w, i) => {
+    const x = marginL + i * slot;
+    const fill = (i % 2 === 0) ? 'var(--week-yellow)' : 'var(--week-white)';
+    svg += `<rect x="${x}" y="${marginT}" width="${slot}" height="${plotH}" fill="${fill}"></rect>`;
+  });
+
+  // 가로 격자선 + y축 라벨 (0, ±yMax/2, ±yMax)
+  [-yMax, -yMax/2, 0, yMax/2, yMax].forEach(v => {
+    const y = marginT + yScale(v);
+    svg += `<line class="tick-line" x1="${marginL}" y1="${y}" x2="${marginL+plotW}" y2="${y}"></line>`;
+    svg += `<text class="axis-label" x="${marginL-8}" y="${y+3}" text-anchor="end">${fmt(v)}</text>`;
+  });
+
+  // 막대들
+  points.forEach((w, i) => {
+    const gx = marginL + i * slot + gap / 2;
+    drawBar(gx, w.foreign, 'bar-foreign');
+    drawBar(gx + barW + barGap, w.individual, 'bar-individual');
+    drawBar(gx + (barW + barGap) * 2, w.institution, 'bar-institution');
+
+    function drawBar(x, val, cls) {
+      const zeroY = marginT + yScale(0);
+      const vY = marginT + yScale(val);
+      const y = Math.min(zeroY, vY);
+      const h = Math.max(1, Math.abs(vY - zeroY));
+      svg += `<rect class="${cls}" x="${x}" y="${y}" width="${barW}" height="${h}"></rect>`;
+    }
+
+    // 라벨(날짜) - 구간이 많으면(예: 52주) 겹치지 않도록 2칸씩 건너뛰며 표시
+    if (n <= 26 || i % 2 === 0) {
+      const lx = marginL + i * slot + slot / 2;
+      const ly = marginT + plotH + 14;
+      svg += `<text class="axis-label" x="${lx}" y="${ly}" text-anchor="end" ` +
+             `transform="rotate(-45 ${lx} ${ly})">${w.date}</text>`;
+    }
+  });
+
+  // 0선 강조
+  const zeroY = marginT + yScale(0);
+  svg += `<line class="zero-line" x1="${marginL}" y1="${zeroY}" x2="${marginL+plotW}" y2="${zeroY}"></line>`;
+
+  svg += `</svg>`;
+  wrapEl.innerHTML = svg;
+
+  // 최신 구간이 오른쪽에 오도록 자동으로 스크롤을 끝까지 이동
+  wrapEl.scrollLeft = wrapEl.scrollWidth;
+}
+
+function fmt(v) {
+  return Math.round(v).toLocaleString('ko-KR');
+}
+
+function niceCeil(v) {
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / p;
+  const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+  return step * p;
+}
+</script>
+</body>
+</html>
