@@ -141,7 +141,7 @@
 // 배포 방법: Apps Script 편집기 > 배포 > 새 배포 > 유형: 웹앱
 //           실행: 나(본인 계정) / 액세스 권한: 모든 사용자
 // 배포 후 나오는 "...../exec" 로 끝나는 URL을 그대로 아래에 넣으세요.
-const WEB_APP_URL = 'https://script.google.com/macros/library/d/1_-J_FhSdq9hYXUtZVrvpL_M96uxno0mQVRSRFs8-5NQQbz3nr99OO0LX/1';
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzv28FiJcH5thGiNf-uCyyKvWYDldshJaSwSJbO40lgSQobFOWXh2oY45XahHr01aBK/exec';
 // ▲▲▲ ------------------------------------------------- ▲▲▲
 
 const statusEl = document.getElementById('status');
@@ -160,9 +160,7 @@ async function load() {
   }
   setStatus('데이터를 불러오는 중…', false);
   try {
-    const res = await fetch(WEB_APP_URL, { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
+    const data = await loadViaJsonp(WEB_APP_URL);
     if (data.weeks && data.weeks.length) {
       render(weekWrapEl, data.weeks, { barW: 9, barGap: 2 });
     }
@@ -175,6 +173,42 @@ async function load() {
     setStatus('불러오기 실패: ' + err.message +
       ' (웹앱 URL이 맞는지, 배포 시 "모든 사용자" 접근권한으로 했는지 확인하세요)', true);
   }
+}
+
+/**
+ * fetch() 대신 <script> 태그로 데이터를 불러오는 JSONP 방식.
+ * 구글 Apps Script 웹앱을 다른 도메인(GitHub Pages 등)에서 fetch()로
+ * 부르면 CORS 때문에 막히는 경우가 있는데, JSONP는 <script> 로드라서
+ * 그 제약 자체를 받지 않는다.
+ */
+function loadViaJsonp(url) {
+  return new Promise(function (resolve, reject) {
+    const cbName = '__kospiJsonp_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+    const script = document.createElement('script');
+    const timeoutId = setTimeout(function () {
+      cleanup();
+      reject(new Error('시간 초과(15초). 네트워크 상태를 확인해 주세요.'));
+    }, 15000);
+
+    function cleanup() {
+      clearTimeout(timeoutId);
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    window[cbName] = function (data) {
+      cleanup();
+      resolve(data);
+    };
+    script.onerror = function () {
+      cleanup();
+      reject(new Error('스크립트 로드 실패 (URL이 올바른지 확인하세요)'));
+    };
+
+    const sep = url.indexOf('?') === -1 ? '?' : '&';
+    script.src = url + sep + 'callback=' + cbName + '&_=' + Date.now();
+    document.body.appendChild(script);
+  });
 }
 
 function setStatus(msg, isError) {
